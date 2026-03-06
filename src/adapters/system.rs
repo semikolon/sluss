@@ -55,6 +55,17 @@ pub fn get_wan_ip() -> Result<String> {
 
 /// Check if a systemd service is active
 pub fn get_service_status(service: &str) -> Result<bool> {
+    // nftables is a oneshot service — it loads rules and exits.
+    // Check if rules are actually loaded instead of service status.
+    if service == "nftables" {
+        let output = execute_shell("nft list ruleset 2>/dev/null | grep -c 'chain'")?;
+        let count: i32 = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .unwrap_or(0);
+        return Ok(count > 0);
+    }
+
     let output = execute_shell(&format!("systemctl is-active {} 2>/dev/null", service))?;
     Ok(output.status.success())
 }
