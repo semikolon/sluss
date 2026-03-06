@@ -35,6 +35,13 @@ pub async fn serve(bind: &str, port: u16) -> anyhow::Result<()> {
 
 // --- Data collection ---
 
+struct SecurityFinding {
+    timestamp: String,
+    category: String,
+    summary: String,
+    findings: Vec<String>,
+}
+
 struct DashboardData {
     wan_ip: String,
     uptime: String,
@@ -45,6 +52,8 @@ struct DashboardData {
     blocked_ips: u32,
     dns_queries_today: String,
     wan_speed: String,
+    disk_pct: String,
+    recent_security: Vec<SecurityFinding>,
 }
 
 fn collect_dashboard_data() -> DashboardData {
@@ -97,6 +106,78 @@ fn collect_dashboard_data() -> DashboardData {
         ("ssh", "Remote Access", "Secure shell access for administration — key-only authentication, no passwords accepted", get_service_status("ssh").unwrap_or(false)),
     ];
 
+    // Disk usage
+    let disk_pct = execute_shell("df / --output=pcent 2>/dev/null | tail -1 | tr -d ' %'")
+        .ok()
+        .map(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() { "?".into() } else { format!("{}%", s) }
+        })
+        .unwrap_or_else(|| "?".into());
+
+    // Recent security findings from daily digest (last 7 days)
+    let recent_security = execute_shell(
+        "tail -20 /var/log/shannon-daily-digest.jsonl 2>/dev/null"
+    )
+    .ok()
+    .map(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter_map(|line| {
+                let parsed: serde_json::Value = serde_json::from_str(line).ok()?;
+                let content = parsed.get("content")?;
+                Some(SecurityFinding {
+                    timestamp: parsed.get("timestamp")?.as_str()?.to_string(),
+                    category: content.get("category")?.as_str()?.to_string(),
+                    summary: content.get("summary")?.as_str()?.to_string(),
+                    findings: content.get("findings")?
+                        .as_array()?
+                        .iter()
+                        .filter_map(|f| f.as_str().map(String::from))
+                        .collect(),
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+
+    // Also grab recent triage log entries (successful ones only)
+    let mut triage_summaries = execute_shell(
+        "grep 'TRIAGE:' /var/log/shannon-llm-triage.log 2>/dev/null | tail -10"
+    )
+    .ok()
+    .map(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter_map(|line| {
+                // Format: 2026-03-06T11:00:18+00:00 TRIAGE: category=normal summary="..."
+                let ts = line.split(' ').next()?.to_string();
+                let cat_start = line.find("category=")? + 9;
+                let cat_end = line[cat_start..].find(' ')? + cat_start;
+                let category = line[cat_start..cat_end].to_string();
+                let sum_start = line.find("summary=\"")? + 9;
+                let sum_end = line.rfind('"')?;
+                let summary = line[sum_start..sum_end].to_string();
+                Some(SecurityFinding {
+                    timestamp: ts,
+                    category,
+                    summary,
+                    findings: vec![],
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_default();
+
+    // Merge: use digest entries (richer) + fill gaps with triage log
+    let mut all_security = recent_security;
+    // Only add triage entries whose timestamps aren't already in digest
+    let digest_timestamps: std::collections::HashSet<&str> = all_security.iter().map(|s| s.timestamp.as_str()).collect();
+    triage_summaries.retain(|s| !digest_timestamps.contains(s.timestamp.as_str()));
+    all_security.extend(triage_summaries);
+    all_security.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    all_security.truncate(10); // Keep last 10
+
     DashboardData {
         wan_ip,
         uptime: metrics.uptime,
@@ -107,6 +188,8 @@ fn collect_dashboard_data() -> DashboardData {
         blocked_ips,
         dns_queries_today,
         wan_speed,
+        disk_pct,
+        recent_security: all_security,
     }
 }
 
@@ -134,6 +217,31 @@ fn render_dashboard(data: &DashboardData) -> String {
 
     let mem_color = if data.memory_pct > 85.0 { "#e74c3c" } else if data.memory_pct > 70.0 { "#f39c12" } else { "#2ecc71" };
     let cpu_color = if data.cpu_load > 2.0 { "#e74c3c" } else if data.cpu_load > 1.0 { "#f39c12" } else { "#2ecc71" };
+
+    // Build security findings HTML
+    let security_findings_html = if data.recent_security.is_empty() {
+        r#"<p class="service-desc" style="color: var(--text2); font-style: italic">No recent findings.</p>"#.to_string()
+    } else {
+        let mut html = String::from(r#"<div style="margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px">"#);
+        html.push_str(r#"<p class="service-desc" style="margin-bottom: 8px"><strong>Recent Findings</strong></p>"#);
+        for finding in &data.recent_security {
+            let cat_color = match finding.category.as_str() {
+                "critical" => "var(--bad)",
+                "normal" => "var(--accent)",
+                _ => "var(--ok)",
+            };
+            let ts_short = &finding.timestamp[..16]; // YYYY-MM-DDTHH:MM
+            let ts_display = ts_short.replace('T', " ");
+            html.push_str(&format!(
+                r#"<div style="margin-bottom: 10px"><span style="color:{cat_color};font-size:1.3rem">&#x25CF;</span> <span style="color:var(--text2);font-size:1.3rem">{ts_display}</span><br><span style="font-size:1.5rem">{summary}</span></div>"#,
+                cat_color = cat_color,
+                ts_display = ts_display,
+                summary = finding.summary,
+            ));
+        }
+        html.push_str("</div>");
+        html
+    };
 
     format!(r##"<!DOCTYPE html>
 <html lang="en">
@@ -338,7 +446,8 @@ h1 {{
     transition: opacity 0.3s;
     pointer-events: none;
     max-width: 90%;
-    text-align: center;
+    text-align: left;
+    white-space: pre-line;
 }}
 .toast.show {{ opacity: 1; }}
 .progress-bar {{
@@ -409,6 +518,10 @@ footer a {{ color: var(--accent); text-decoration: none; }}
         <div class="stat-value" style="color: var(--bad)">{blocked}</div>
         <div class="stat-label">IPs Blocked</div>
     </div>
+    <div class="card stat-card">
+        <div class="stat-value">{disk}</div>
+        <div class="stat-label">Disk Used</div>
+    </div>
 </div>
 
 <div class="section-title">Quick Actions</div>
@@ -417,6 +530,10 @@ footer a {{ color: var(--accent); text-decoration: none; }}
     <button class="btn btn-success" onclick="doAction('doctor')">Health Check</button>
     <button class="btn btn-warning" onclick="doAction('restart', 'wan')">Restart WAN</button>
     <button class="btn btn-danger" onclick="doAction('reboot')" id="reboot-btn">Reboot Router</button>
+    <button class="btn btn-sm" onclick="doAction('flush_dns')">Flush DNS Cache</button>
+    <button class="btn btn-sm" onclick="doAction('update_blocklists')">Update Blocklists</button>
+    <button class="btn btn-sm" onclick="doAction('show_leases')">Connected Devices</button>
+    <button class="btn btn-sm" onclick="doAction('wg_status')">VPN Status</button>
 </div>
 
 <div class="section-title">Services &mdash; What runs on this router</div>
@@ -428,19 +545,11 @@ footer a {{ color: var(--accent); text-decoration: none; }}
         <strong>Dual-Layer Threat Analysis</strong>
     </div>
     <p class="service-desc">
-        Two AI models continuously analyze network security:
+        <strong style="color: var(--accent)">Hourly</strong> (GPT-5-nano) &mdash; quick threat classification.
+        <strong style="color: #ce93d8">Daily</strong> (Gemini 3.1 Pro) &mdash; deep pattern correlation.
+        Cost: ~$3/month.
     </p>
-    <p class="service-desc" style="margin-top: 8px">
-        <strong style="color: var(--accent)">Hourly triage</strong> (GPT-5-nano) &mdash;
-        Scans CrowdSec alerts and classifies threats as critical, notable, or routine. Quick and cheap, catches obvious attacks fast.
-    </p>
-    <p class="service-desc" style="margin-top: 8px">
-        <strong style="color: #ce93d8">Daily deep analysis</strong> (Gemini 3.1 Pro) &mdash;
-        Correlates patterns across 24 hours of data. Finds subtle behavioral anomalies that simple rules miss &mdash; like slow port scans or credential stuffing spread across hours.
-    </p>
-    <p class="service-desc" style="margin-top: 8px; color: var(--text2)">
-        Cost: ~$3/month. Alerts delivered via voice narration (Ruby AI assistant).
-    </p>
+    {security_findings}
 </div>
 
 <div class="section-title">Network Info</div>
@@ -466,7 +575,11 @@ footer a {{ color: var(--accent); text-decoration: none; }}
 <script>
 function showToast(msg, duration) {{
     const t = document.getElementById('toast');
-    t.textContent = msg;
+    if (msg.includes('\\n')) {{
+        t.innerHTML = msg.replace(/\\n/g, '<br>');
+    }} else {{
+        t.textContent = msg;
+    }}
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), duration || 3000);
 }}
@@ -479,8 +592,10 @@ async function doAction(action, target) {{
     try {{
         const resp = await fetch('/api/action?action=' + action + (target ? '&target=' + target : ''));
         const data = await resp.json();
-        showToast(data.message, 4000);
-        if (action !== 'reboot') setTimeout(() => location.reload(), 2000);
+        const lines = (data.message.match(/\\n/g) || []).length;
+        const dur = lines > 2 ? 4000 + lines * 800 : 4000;
+        showToast(data.message, dur);
+        if (action !== 'reboot') setTimeout(() => location.reload(), Math.max(2000, dur - 1000));
     }} catch(e) {{
         showToast('Error: ' + e.message, 5000);
     }}
@@ -500,6 +615,8 @@ async function doAction(action, target) {{
         wan_speed = data.wan_speed,
         dns_queries = data.dns_queries_today,
         services = services_html,
+        disk = data.disk_pct,
+        security_findings = security_findings_html,
     )
 }
 
@@ -629,6 +746,53 @@ async fn api_action(Query(params): Query<ActionParams>) -> impl IntoResponse {
             "reboot" => {
                 let _ = execute_shell("shutdown -r +1 'Reboot requested from web dashboard'");
                 serde_json::json!({"ok": true, "message": "Rebooting in 1 minute..."})
+            }
+            "flush_dns" => {
+                let _ = execute_shell("curl -s -X POST http://127.0.0.1:3000/control/cache_clear 2>/dev/null");
+                serde_json::json!({"ok": true, "message": "DNS cache flushed"})
+            }
+            "update_blocklists" => {
+                let output = execute_shell("curl -s -X POST http://127.0.0.1:3000/control/filtering/refresh 2>/dev/null");
+                match output {
+                    Ok(_) => serde_json::json!({"ok": true, "message": "Blocklist update triggered"}),
+                    Err(e) => serde_json::json!({"ok": false, "message": format!("Error: {}", e)}),
+                }
+            }
+            "show_leases" => {
+                let output = execute_shell("cat /var/lib/misc/dnsmasq.leases 2>/dev/null");
+                match output {
+                    Ok(o) => {
+                        let text = String::from_utf8_lossy(&o.stdout);
+                        let devices: Vec<String> = text.lines().map(|line| {
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() >= 4 {
+                                format!("{} — {} ({})", parts[2], parts[3], parts[1])
+                            } else {
+                                line.to_string()
+                            }
+                        }).collect();
+                        let count = devices.len();
+                        let list = devices.join("\n");
+                        serde_json::json!({"ok": true, "message": format!("{} devices:\n{}", count, list)})
+                    }
+                    Err(e) => serde_json::json!({"ok": false, "message": format!("Error: {}", e)}),
+                }
+            }
+            "wg_status" => {
+                let output = execute_shell("wg show 2>/dev/null");
+                match output {
+                    Ok(o) => {
+                        let text = String::from_utf8_lossy(&o.stdout).to_string();
+                        if text.trim().is_empty() {
+                            serde_json::json!({"ok": true, "message": "WireGuard: no active peers"})
+                        } else {
+                            // Extract peer count and latest handshake
+                            let peers = text.matches("peer:").count();
+                            serde_json::json!({"ok": true, "message": format!("WireGuard: {} peer(s) configured\n{}", peers, text.trim())})
+                        }
+                    }
+                    Err(e) => serde_json::json!({"ok": false, "message": format!("Error: {}", e)}),
+                }
             }
             _ => serde_json::json!({"ok": false, "message": "Unknown action"}),
         }
