@@ -1,7 +1,7 @@
-//! shannon - Unified router management CLI for Rock Pi 4B SE
+//! sluss — Unified router management CLI
 //!
 //! A token-efficient CLI for both humans and AI agents to manage
-//! DNS, DHCP, firewall, security, and VPN on the SHANNON router.
+//! DNS, DHCP, firewall, security, and VPN on a Linux router.
 
 mod adapters;
 mod cli;
@@ -22,7 +22,7 @@ fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("shannon=info".parse().unwrap()),
+                .add_directive("sluss=info".parse().unwrap()),
         )
         .with_target(false)
         .with_writer(std::io::stderr)

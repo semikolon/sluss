@@ -26,8 +26,11 @@ pub struct ServiceStatus {
 
 impl Display for SystemStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "SHANNON Router Status")?;
-        writeln!(f, "=====================")?;
+        let host = hostname::get()
+            .map(|h| h.to_string_lossy().to_uppercase().to_string())
+            .unwrap_or_else(|_| "ROUTER".to_string());
+        writeln!(f, "{} Router Status", host)?;
+        writeln!(f, "{}", "=".repeat(host.len() + 14))?;
         writeln!(f, "WAN IP:     {}", self.wan_ip)?;
         writeln!(f, "Uptime:     {}", self.uptime)?;
         writeln!(f, "Memory:     {:.1}%", self.memory_used_percent)?;
@@ -42,7 +45,7 @@ impl Display for SystemStatus {
     }
 }
 
-/// Run `shannon status`
+/// Run `sluss status`
 pub fn status(json: bool) -> Result<()> {
     let wan_ip = get_wan_ip().unwrap_or_else(|_| "unknown".to_string());
     let metrics = get_system_metrics()?;
@@ -83,8 +86,11 @@ pub struct DiagnosticCheck {
 
 impl Display for DiagnosticResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "SHANNON Doctor")?;
-        writeln!(f, "==============")?;
+        let host = hostname::get()
+            .map(|h| h.to_string_lossy().to_uppercase().to_string())
+            .unwrap_or_else(|_| "ROUTER".to_string());
+        writeln!(f, "{} Doctor", host)?;
+        writeln!(f, "{}", "=".repeat(host.len() + 7))?;
         for check in &self.checks {
             let indicator = if check.passed { "✓" } else { "✗" };
             writeln!(f, "{} {}: {}", indicator, check.name, check.message)?;
@@ -99,7 +105,7 @@ impl Display for DiagnosticResult {
     }
 }
 
-/// Run `shannon doctor`
+/// Run `sluss doctor`
 pub fn doctor(json: bool) -> Result<()> {
     let mut checks = Vec::new();
 

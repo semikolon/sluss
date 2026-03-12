@@ -1,84 +1,94 @@
-# shannon
+# sluss
 
-Unified router management CLI for Rock Pi 4B SE (SHANNON).
+Unified router management CLI for Linux routers.
 
 A token-efficient CLI designed for both humans and AI agents to manage DNS, DHCP, firewall, VPN, and security on a home router.
 
-**v0.1.0** deployed on SHANNON at `/usr/local/bin/shannon`. Security stack (AdGuard Home + CrowdSec + WireGuard) installed and operational.
+**v0.2.0** — generic router CLI (renamed from `shannon`). Works on any Linux router with dnsmasq + systemd.
 
 ## Features
 
-- **System Health**: `shannon status` overview, `shannon doctor` diagnostics
+- **System Health**: `sluss status` overview, `sluss doctor` diagnostics
 - **DNS Management**: Add/remove/list local DNS records
 - **DHCP Management**: View leases, add static reservations
 - **Firewall**: Port forwarding, IP blocking
 - **Security Stack**: CrowdSec IDS, AdGuard Home DNS filtering, WireGuard VPN
-- **LLM Security Analysis**: GPT-5-nano hourly triage + Gemini 3.1 Pro daily deep analysis (~$3/month)
-- **Dynamic DNS**: Auto-updates `shannon.fredrikbranstrom.se` via Loopia API on IP change
+- **LLM Security Analysis**: GPT-5-nano hourly triage + Gemini 3 Pro daily deep analysis (~$3/month)
+- **Dynamic DNS**: Auto-updates via Loopia API on IP change
+- **Web Dashboard**: Mobile-friendly status page with quick actions (`sluss web`)
 - **Dual Output**: Plain text for humans, `--json` for AI agents
-- **Location-Aware**: Works locally on SHANNON or remotely via SSH
+- **Location-Aware**: Works locally on the router or remotely via SSH
 
 ## Installation
 
 ### From Source
 
 ```bash
-# Build for current platform
 cargo build --release
 
-# Copy to SHANNON
-scp target/release/shannon shannon:/usr/local/bin/
+# Copy to router
+scp target/release/sluss router:/usr/local/bin/
 
-# Or use cross-compilation for ARM64
+# Or cross-compile for ARM64
 cross build --release --target aarch64-unknown-linux-gnu
-scp target/aarch64-unknown-linux-gnu/release/shannon shannon:/usr/local/bin/
+scp target/aarch64-unknown-linux-gnu/release/sluss router:/usr/local/bin/
 ```
 
-### Mac Alias (Optional)
+### Remote Usage
 
-Add to your `~/.zshrc`:
+Set `SLUSS_ROUTER` to the SSH host alias for your router (defaults to `router`):
+
 ```bash
-alias shannon='ssh shannon shannon'
+# Option A: set env var
+export SLUSS_ROUTER=shannon
+sluss status
+
+# Option B: SSH alias
+alias sluss='ssh router sluss'
 ```
 
 ## Usage
 
 ```bash
 # System health
-shannon status              # Overview (WAN IP, memory, services)
-shannon doctor              # Run diagnostic checks
+sluss status              # Overview (WAN IP, memory, services)
+sluss doctor              # Run diagnostic checks
 
 # DNS management
-shannon dns list            # List all DNS records
-shannon dns add myhost 192.168.4.100
-shannon dns rm myhost
+sluss dns list            # List all DNS records
+sluss dns add myhost 192.168.4.100
+sluss dns rm myhost
 
 # DHCP management
-shannon dhcp leases         # List all leases
-shannon dhcp reserve aa:bb:cc:dd:ee:ff 192.168.4.100 --hostname mydevice
-shannon dhcp unreserve aa:bb:cc:dd:ee:ff
+sluss dhcp leases         # List all leases
+sluss dhcp reserve aa:bb:cc:dd:ee:ff 192.168.4.100 --hostname mydevice
+sluss dhcp unreserve aa:bb:cc:dd:ee:ff
 
 # Firewall
-shannon fw list             # List port forwards
-shannon fw forward 8080 192.168.4.84:80 --proto tcp
-shannon fw unforward 8080
-shannon fw block 1.2.3.4
-shannon fw unblock 1.2.3.4
+sluss fw list             # List port forwards
+sluss fw forward 8080 192.168.4.84:80 --proto tcp
+sluss fw unforward 8080
+sluss fw block 1.2.3.4
+sluss fw unblock 1.2.3.4
 
 # Security
-shannon sec status          # Health of AdGuard, CrowdSec, WireGuard
-shannon sec blocks          # Active CrowdSec decisions (blocked IPs)
-shannon sec scan            # Run security analysis
-shannon sec report          # View recent findings
+sluss sec status          # Health of AdGuard, CrowdSec, WireGuard
+sluss sec blocks          # Active CrowdSec decisions (blocked IPs)
+sluss sec scan            # Run security analysis
+sluss sec report          # View recent findings
 
 # VPN
-shannon vpn peers           # WireGuard peers with handshake status
-shannon vpn status          # WireGuard interface status
+sluss vpn peers           # WireGuard peers with handshake status
+sluss vpn status          # WireGuard interface status
 
 # Dynamic DNS
-shannon ddns status         # WAN IP, DNS record, timer status
-shannon ddns update         # Check and update if IP changed
-shannon ddns update --force # Force DNS update
+sluss ddns status         # WAN IP, DNS record, timer status
+sluss ddns update         # Check and update if IP changed
+sluss ddns update --force # Force DNS update
+
+# Web dashboard
+sluss web                 # Start at 0.0.0.0:8080
+sluss web -p 80           # Start on port 80
 ```
 
 ### AI Agent Usage
@@ -86,99 +96,82 @@ shannon ddns update --force # Force DNS update
 All commands support `--json` for structured output:
 
 ```bash
-shannon status --json
-shannon dhcp leases --json
+sluss status --json
+sluss dhcp leases --json
 ```
 
 Use `--yes` to skip confirmation prompts for automation:
 
 ```bash
-shannon fw forward 8080 192.168.4.84:80 --yes
+sluss fw forward 8080 192.168.4.84:80 --yes
 ```
 
 ## Architecture
 
 ```
-shannon CLI
-├── status         → sysinfo + systemctl (5 services)
-├── doctor         → diagnostic checks (top-level)
+sluss CLI
+├── status         → sysinfo + systemctl
+├── doctor         → diagnostic checks
 ├── dns            → dnsmasq config parsing
 ├── dhcp           → dnsmasq leases + dhcp-host
 ├── fw             → nftables rules
 ├── sec            → CrowdSec + AdGuard adapters
-│   ├── status     → combined health (AdGuard + CrowdSec + WireGuard)
+│   ├── status     → combined health
 │   └── blocks     → active CrowdSec decisions
 ├── vpn            → WireGuard adapter
 │   ├── peers      → peer list with handshake status
 │   └── status     → interface overview
-└── ddns           → Dynamic DNS (Loopia API)
-    ├── status     → WAN IP, DNS record, timer
-    └── update     → check and update if changed
+├── ddns           → Dynamic DNS (Loopia API)
+│   ├── status     → WAN IP, DNS record, timer
+│   └── update     → check and update if changed
+└── web            → Dashboard (axum, CircularStd font)
 ```
 
 ## Security Stack
 
-Deployed and running. Specs at `.claude/specs/security-stack/`. RAM: ~449 MB total (12% of 4 GB).
+Dual-layer approach complementing CrowdSec's pattern matching with LLM semantic reasoning:
 
-### Components
+| Service | Port | Purpose |
+|---------|------|---------|
+| AdGuard Home | 53 (DNS), 3000 (web) | DNS filtering, blocklist rules, DoH upstream |
+| CrowdSec | — | IDS with nftables bouncer, SSH monitoring, community blocklist |
+| WireGuard | 51820 | VPN (kernel-space), encrypted remote access |
 
-| Service | Port | RAM | Purpose |
-|---------|------|-----|---------|
-| AdGuard Home | 53 (DNS), 3000 (web) | ~105 MB | DNS filtering, 507K+ blocklist rules (OISD + AdGuard default), DoH upstream (Cloudflare + Quad9) |
-| CrowdSec | — | ~88 MB | IDS with nftables bouncer, SSH monitoring, community blocklist |
-| WireGuard | 51820 | ~0 MB | VPN (kernel-space), 4 peers configured |
-
-dnsmasq remains for DHCP only (`port=0`). All DNS queries go through AdGuard Home.
+dnsmasq handles DHCP only (`port=0`). All DNS queries go through AdGuard Home.
 
 ### LLM Security Analysis (~$3/month)
 
-Dual-layer approach complementing CrowdSec's pattern matching with LLM semantic reasoning:
+- **Hourly**: GPT-5-nano triage — categorizes critical/normal/clear
+- **Daily**: Gemini 3 Pro deep analysis — pattern correlation, behavioral anomalies, trend detection
 
-- **Hourly**: GPT-5-nano triage (`/usr/local/bin/shannon-triage-hourly`) — categorizes critical/normal/clear
-- **Daily**: Gemini 3.1 Pro deep analysis (`/usr/local/bin/shannon-triage-daily`) — pattern correlation, behavioral anomalies, trend detection
-
-Results saved to `/var/log/shannon-security-analyses/`. Critical findings route to ntfy urgent topic.
-
-### Alert Pipeline
-
-SHANNON CrowdSec → ntfy server (Dell) → ntfy-bridge (Mac) → TTS daemon → Ruby narrates.
-
-**Note**: Dell currently unreachable at 192.168.4.84 (needs network config update post-Huddinge move).
+Results saved to `/var/log/router-security-analyses/`. Critical findings route to ntfy.
 
 ### Dynamic DNS
 
-`shannon.fredrikbranstrom.se` auto-updated via Loopia XMLRPC API. Python script reads WAN IP directly from interface (zero external calls), updates DNS only on change. Timer disabled — awaiting Loopia API credentials.
+Auto-updates via Loopia XMLRPC API. Reads WAN IP directly from interface (zero external calls), updates DNS only on change.
 
 | Component | Path |
 |-----------|------|
-| Update script | `/usr/local/lib/shannon-security/ddns_update.py` |
-| Symlink | `/usr/local/bin/shannon-ddns` |
-| Timer | `shannon-ddns.timer` (5 min, currently disabled) |
-| State | `/var/cache/shannon-ddns-state.json` |
-| Credentials | `/etc/shannon-security/env` (`LOOPIA_USER`, `LOOPIA_PASSWORD`) |
-
-**WAN interface**: `enxc84d4421f975` (USB ethernet, DHCP lease from Bahnhof). IP is dynamic — DDNS essential for WireGuard endpoint stability.
+| Update script | `/usr/local/lib/router-security/ddns_update.py` |
+| Timer | `router-ddns.timer` (5 min) |
+| State | `/var/cache/router-ddns-state.json` |
+| Credentials | `/etc/router-security/env` |
 
 ## Configuration
 
-Default paths (on SHANNON):
+Default paths:
 - dnsmasq config: `/etc/dnsmasq.conf`
 - Custom DNS: `/etc/dnsmasq.d/custom.conf`
 - DHCP leases: `/var/lib/misc/dnsmasq.leases`
-- SSH hardening: `/etc/ssh/sshd_config.d/hardening.conf` (key-only, LAN+VPN listen)
-- nftables rules: managed by CrowdSec bouncer + WireGuard PostUp/PostDown
-- WireGuard: `/etc/wireguard/wg0.conf`, peer configs in `/etc/wireguard/peers/`
-- AdGuard Home: `/opt/AdGuardHome/AdGuardHome.yaml`
-- CrowdSec: `/etc/crowdsec/config.yaml`, notifications in `/etc/crowdsec/notifications/`
-- LLM scripts: `/usr/local/lib/shannon-security/`, API keys in `/etc/shannon-security/env`
-- LLM logs: `/var/log/shannon-llm-triage.log`, analyses in `/var/log/shannon-security-analyses/`
+- LLM scripts: `/usr/local/lib/router-security/`
+- LLM logs: `/var/log/router-llm-triage.log`
+- Analysis archive: `/var/log/router-security-analyses/`
 
 ## Requirements
 
-- SHANNON running Armbian Trixie (kernel 6.18, ARM64) with dnsmasq
-- SSH access configured (`~/.ssh/config` with `Host shannon`)
-- Root access on SHANNON
-- Public IP on WAN interface (no port forwarding needed — SHANNON is the border device)
+- Linux with dnsmasq + systemd
+- SSH access for remote operation
+- Root access on the router
 
 ## License
 

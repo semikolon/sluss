@@ -1410,28 +1410,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shannon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "chrono",
- "clap",
- "dirs",
- "hostname",
- "ipnetwork",
- "reqwest",
- "serde",
- "serde_json",
- "sysinfo",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1461,6 +1439,28 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "sluss"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "clap",
+ "dirs",
+ "hostname",
+ "ipnetwork",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "smallvec"

@@ -5,8 +5,8 @@ use std::net::IpAddr;
 
 #[derive(Parser)]
 #[command(
-    name = "shannon",
-    about = "Unified router management CLI for Rock Pi 4B SE",
+    name = "sluss",
+    about = "Unified router management CLI",
     version,
     author
 )]
@@ -61,7 +61,7 @@ pub enum Commands {
         action: VpnAction,
     },
 
-    /// Dynamic DNS management (shannon.fredrikbranstrom.se)
+    /// Dynamic DNS management
     Ddns {
         #[command(subcommand)]
         action: DdnsAction,

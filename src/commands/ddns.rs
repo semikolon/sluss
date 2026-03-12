@@ -1,8 +1,8 @@
 //! Dynamic DNS management commands
 //!
-//! Reads state from /var/cache/shannon-ddns-state.json (written by
-//! /usr/local/bin/shannon-ddns Python script running via systemd timer).
-//! Provides `shannon ddns status` and `shannon ddns update` commands.
+//! Reads state from /var/cache/router-ddns-state.json (written by
+//! router-ddns Python script running via systemd timer).
+//! Provides `sluss ddns status` and `sluss ddns update` commands.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -11,8 +11,8 @@ use std::process::Command;
 
 use crate::output::print_output;
 
-const STATE_FILE: &str = "/var/cache/shannon-ddns-state.json";
-const DDNS_SCRIPT: &str = "/usr/local/bin/shannon-ddns";
+const STATE_FILE: &str = "/var/cache/router-ddns-state.json";
+const DDNS_SCRIPT: &str = "/usr/local/lib/router-security/ddns_update.py";
 const WAN_INTERFACE: &str = "enxc84d4421f975";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,7 +77,7 @@ fn get_wan_ip() -> Option<String> {
 /// Check if systemd timer is active
 fn timer_active() -> bool {
     Command::new("systemctl")
-        .args(["is-active", "--quiet", "shannon-ddns.timer"])
+        .args(["is-active", "--quiet", "router-ddns.timer"])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -133,7 +133,7 @@ pub fn update(force: bool, json: bool) -> Result<()> {
     }
 
     let output = cmd.output()
-        .context("Failed to run shannon-ddns script")?;
+        .context("Failed to run DDNS update script")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

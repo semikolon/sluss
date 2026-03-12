@@ -1,14 +1,30 @@
 //! Location detection for local vs remote execution
+//!
+//! Detects whether sluss is running on the router itself (local mode)
+//! or on another machine (remote mode via SSH).
+//!
+//! Remote target: set SLUSS_ROUTER env var or defaults to "router" SSH host.
 
 use anyhow::{Context, Result};
 use std::process::{Command, Output, Stdio};
 
-const SHANNON_HOSTNAME: &str = "shannon";
+/// Default SSH host alias for the router
+const DEFAULT_ROUTER_HOST: &str = "router";
 
-/// Check if we're running on SHANNON itself
+/// Get the configured router SSH host
+fn router_host() -> String {
+    std::env::var("SLUSS_ROUTER").unwrap_or_else(|_| DEFAULT_ROUTER_HOST.to_string())
+}
+
+/// Check if we're running on the router itself
+/// (dnsmasq running locally = we're on the router)
 pub fn is_local() -> bool {
-    hostname::get()
-        .map(|h| h.to_string_lossy().to_lowercase() == SHANNON_HOSTNAME)
+    Command::new("systemctl")
+        .args(["is-active", "--quiet", "dnsmasq"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
         .unwrap_or(false)
 }
 
@@ -23,7 +39,7 @@ pub fn execute_shell(cmd: &str) -> Result<Output> {
             .context("Failed to execute command locally")
     } else {
         Command::new("ssh")
-            .args([SHANNON_HOSTNAME, cmd])
+            .args([&router_host(), cmd])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -47,7 +63,6 @@ pub fn read_file(path: &str) -> Result<String> {
 
 /// Write content to a file, either locally or via SSH
 pub fn write_file(path: &str, content: &str) -> Result<()> {
-    // Escape content for shell
     let escaped = content.replace('\'', "'\\''");
     let cmd = format!("printf '%s' '{}' > {}", escaped, path);
     let output = execute_shell(&cmd)?;
@@ -99,7 +114,19 @@ mod tests {
 
     #[test]
     fn test_is_local_returns_bool() {
-        // Just verify it doesn't panic
         let _ = is_local();
+    }
+
+    #[test]
+    fn test_router_host_default() {
+        std::env::remove_var("SLUSS_ROUTER");
+        assert_eq!(router_host(), "router");
+    }
+
+    #[test]
+    fn test_router_host_env() {
+        std::env::set_var("SLUSS_ROUTER", "darwin");
+        assert_eq!(router_host(), "darwin");
+        std::env::remove_var("SLUSS_ROUTER");
     }
 }

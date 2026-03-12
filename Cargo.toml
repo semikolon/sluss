@@ -1,11 +1,11 @@
 [package]
-name = "shannon"
-version = "0.1.0"
+name = "sluss"
+version = "0.2.0"
 edition = "2021"
 authors = ["Fredrik Bränström"]
-description = "Unified router management CLI for Rock Pi 4B SE"
+description = "Unified router management CLI"
 license = "MIT"
-repository = "https://github.com/semikolon/shannon"
+repository = "https://github.com/semikolon/sluss"
 
 [dependencies]
 # CLI framework

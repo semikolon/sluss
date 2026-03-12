@@ -1,7 +1,7 @@
-//! Web dashboard for SHANNON router
+//! Web dashboard for sluss router management
 //!
 //! Serves a mobile-friendly status page with big buttons for common admin tasks.
-//! Designed for LAN-only access (http://internet.local:8080).
+//! Designed for LAN-only access (http://internet.home).
 
 use axum::{
     extract::{Path, Query},
@@ -25,8 +25,10 @@ pub async fn serve(bind: &str, port: u16) -> anyhow::Result<()> {
         .route("/fonts/{filename}", get(serve_font));
 
     let addr: SocketAddr = format!("{}:{}", bind, port).parse()?;
-    info!("SHANNON dashboard at http://{}:{}", bind, port);
-    info!("Add 'internet.local' to dnsmasq for friendly access");
+    let host = hostname::get()
+        .map(|h| h.to_string_lossy().to_uppercase().to_string())
+        .unwrap_or_else(|_| "ROUTER".to_string());
+    info!("{} dashboard at http://{}:{}", host, bind, port);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -117,7 +119,7 @@ fn collect_dashboard_data() -> DashboardData {
 
     // Recent security findings from daily digest (last 7 days)
     let recent_security = execute_shell(
-        "tail -20 /var/log/shannon-daily-digest.jsonl 2>/dev/null"
+        "tail -20 /var/log/router-daily-digest.jsonl 2>/dev/null"
     )
     .ok()
     .map(|o| {
@@ -143,7 +145,7 @@ fn collect_dashboard_data() -> DashboardData {
 
     // Also grab recent triage log entries (successful ones only)
     let mut triage_summaries = execute_shell(
-        "grep 'TRIAGE:' /var/log/shannon-llm-triage.log 2>/dev/null | tail -10"
+        "grep 'TRIAGE:' /var/log/router-llm-triage.log 2>/dev/null | tail -10"
     )
     .ok()
     .map(|o| {
@@ -171,7 +173,7 @@ fn collect_dashboard_data() -> DashboardData {
 
     // Also read daily analysis JSON files (last 7 days)
     let daily_analyses = execute_shell(
-        "ls -t /var/log/shannon-security-analyses/????-??-??.json 2>/dev/null | head -7 | while read f; do echo \"$f\"; cat \"$f\"; echo; done"
+        "ls -t /var/log/router-security-analyses/????-??-??.json 2>/dev/null | head -7 | while read f; do echo \"$f\"; cat \"$f\"; echo; done"
     )
     .ok()
     .map(|o| {
@@ -238,6 +240,22 @@ fn collect_dashboard_data() -> DashboardData {
 }
 
 // --- HTML rendering ---
+
+fn get_host_label() -> (String, String) {
+    let host = hostname::get()
+        .map(|h| h.to_string_lossy().to_uppercase().to_string())
+        .unwrap_or_else(|_| "ROUTER".to_string());
+    let platform = std::fs::read_to_string("/sys/firmware/devicetree/base/model")
+        .map(|m| m.trim_end_matches('\0').to_string())
+        .or_else(|_| {
+            std::process::Command::new("sh")
+                .args(["-c", "lscpu 2>/dev/null | grep 'Model name' | cut -d: -f2"])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        })
+        .unwrap_or_default();
+    (host, platform)
+}
 
 fn render_dashboard(data: &DashboardData) -> String {
     let services_html: String = data.services.iter().map(|(id, name, desc, active)| {
@@ -532,7 +550,7 @@ footer a {{ color: var(--accent); text-decoration: none; }}
 <body>
 
 <h1>Sarpetorp Internet</h1>
-<p class="subtitle">SHANNON Router &middot; Rock Pi 4B &middot; {uptime}</p>
+<p class="subtitle">{host_label} Router &middot; {platform_label} &middot; {uptime}</p>
 
 <div class="grid">
     <div class="card stat-card">
@@ -611,8 +629,7 @@ footer a {{ color: var(--accent); text-decoration: none; }}
 </div>
 
 <footer>
-    SHANNON &middot; Named after <a href="https://en.wikipedia.org/wiki/Claude_Shannon">Claude Shannon</a>, father of information theory<br>
-    Powered by Armbian Linux on Rock Pi 4B SE
+    {host_label} &middot; Powered by <a href="https://github.com/semikolon/sluss">sluss</a> router management
 </footer>
 
 <div class="toast" id="toast"></div>
@@ -662,6 +679,14 @@ async function doAction(action, target) {{
         services = services_html,
         disk = data.disk_pct,
         security_findings = security_findings_html,
+        host_label = {
+            let (host, _) = get_host_label();
+            host
+        },
+        platform_label = {
+            let (_, platform) = get_host_label();
+            if platform.is_empty() { "Linux".to_string() } else { platform }
+        },
     )
 }
 
@@ -739,7 +764,7 @@ async fn api_action(Query(params): Query<ActionParams>) -> impl IntoResponse {
     let result = tokio::task::spawn_blocking(move || {
         match params.action.as_str() {
             "doctor" => {
-                let output = execute_shell("shannon doctor 2>&1");
+                let output = execute_shell("sluss doctor 2>&1");
                 match output {
                     Ok(o) => {
                         let text = String::from_utf8_lossy(&o.stdout).to_string();
