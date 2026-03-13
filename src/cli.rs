@@ -178,6 +178,13 @@ pub enum SecAction {
         #[arg(short = 'n', long, default_value = "24")]
         hours: u32,
     },
+
+    /// Silence-first triage digest (only outputs if something noteworthy)
+    Findings {
+        /// Number of days to look back (default: 14)
+        #[arg(short = 'n', long, default_value = "14")]
+        days: u32,
+    },
 }
 
 // VPN subcommands

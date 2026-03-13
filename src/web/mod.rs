@@ -21,6 +21,7 @@ pub async fn serve(bind: &str, port: u16) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(dashboard))
         .route("/api/status", get(api_status))
+        .route("/api/findings", get(api_findings))
         .route("/api/action", get(api_action))
         .route("/fonts/{filename}", get(serve_font));
 
@@ -119,7 +120,7 @@ fn collect_dashboard_data() -> DashboardData {
 
     // Recent security findings from daily digest (last 7 days)
     let recent_security = execute_shell(
-        "tail -20 /var/log/router-daily-digest.jsonl 2>/dev/null"
+        "tail -20 /var/log/shannon-daily-digest.jsonl 2>/dev/null"
     )
     .ok()
     .map(|o| {
@@ -145,7 +146,7 @@ fn collect_dashboard_data() -> DashboardData {
 
     // Also grab recent triage log entries (successful ones only)
     let mut triage_summaries = execute_shell(
-        "grep 'TRIAGE:' /var/log/router-llm-triage.log 2>/dev/null | tail -10"
+        "grep 'TRIAGE:' /var/log/shannon-llm-triage.log 2>/dev/null | tail -10"
     )
     .ok()
     .map(|o| {
@@ -173,7 +174,7 @@ fn collect_dashboard_data() -> DashboardData {
 
     // Also read daily analysis JSON files (last 7 days)
     let daily_analyses = execute_shell(
-        "ls -t /var/log/router-security-analyses/????-??-??.json 2>/dev/null | head -7 | while read f; do echo \"$f\"; cat \"$f\"; echo; done"
+        "ls -t /var/log/shannon-security-analyses/????-??-??.json 2>/dev/null | head -7 | while read f; do echo \"$f\"; cat \"$f\"; echo; done"
     )
     .ok()
     .map(|o| {
@@ -714,6 +715,23 @@ async fn api_status() -> impl IntoResponse {
         "services": data.services.iter().map(|(id, name, _, active)| {
             serde_json::json!({"id": id, "name": name, "active": active})
         }).collect::<Vec<_>>(),
+    });
+
+    (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], json.to_string())
+}
+
+/// Silence-first findings API: returns noteworthy security findings only.
+/// Empty `noteworthy` array = everything is fine, nothing to show.
+async fn api_findings() -> impl IntoResponse {
+    let findings = tokio::task::spawn_blocking(|| {
+        crate::commands::sec::collect_noteworthy_findings(14)
+    })
+    .await
+    .unwrap();
+
+    let json = serde_json::json!({
+        "noteworthy": findings,
+        "days_checked": 14,
     });
 
     (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], json.to_string())

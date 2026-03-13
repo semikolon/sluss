@@ -81,6 +81,7 @@ fn run(cli: Cli) -> Result<()> {
             SecAction::Blocks => commands::sec::blocks(cli.json),
             SecAction::Scan => commands::sec::scan(cli.json),
             SecAction::Report { hours } => commands::sec::report(hours, cli.json),
+            SecAction::Findings { days } => commands::sec::findings(days, cli.json),
         },
 
         Commands::Vpn { action } => match action {
