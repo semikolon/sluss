@@ -55,6 +55,7 @@ struct DashboardData {
     blocked_ips: u32,
     dns_queries_today: String,
     wan_speed: String,
+    wan_usb_speed: String,
     disk_pct: String,
     recent_security: Vec<SecurityFinding>,
 }
@@ -98,6 +99,23 @@ fn collect_dashboard_data() -> DashboardData {
             if s.is_empty() { "Unknown".into() } else { s }
         })
         .unwrap_or_else(|| "Unknown".into());
+
+    // Detect WAN adapter USB bus speed from sysfs
+    let wan_usb_speed = execute_shell(
+        "cat /sys/class/net/enxc84d4421f975/device/../speed 2>/dev/null"
+    )
+    .ok()
+    .map(|o| {
+        let speed = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        match speed.as_str() {
+            "5000" => "USB 3.0".to_string(),
+            "10000" => "USB 3.1".to_string(),
+            "480" => "USB 2.0".to_string(),
+            s if !s.is_empty() => format!("USB ({}Mbps)", s),
+            _ => "USB".to_string(),
+        }
+    })
+    .unwrap_or_else(|| "USB".to_string());
 
     let services = vec![
         ("dnsmasq", "Network Core", "Assigns IP addresses to all devices and resolves domain names on the local network (DHCP + DNS)", get_service_status("dnsmasq").unwrap_or(false)),
@@ -235,6 +253,7 @@ fn collect_dashboard_data() -> DashboardData {
         blocked_ips,
         dns_queries_today,
         wan_speed,
+        wan_usb_speed,
         disk_pct,
         recent_security: all_security,
     }
@@ -551,7 +570,7 @@ footer a {{ color: var(--accent); text-decoration: none; }}
 <body>
 
 <h1>Sarpetorp Internet</h1>
-<p class="subtitle">{host_label} Router &middot; {platform_label} &middot; {uptime}</p>
+<p class="subtitle">{host_label} &middot; Your home internet router &middot; {uptime}</p>
 
 <div class="grid">
     <div class="card stat-card">
@@ -624,7 +643,7 @@ footer a {{ color: var(--accent); text-decoration: none; }}
         <tr><td style="padding:4px 0">DNS</td><td style="text-align:right">AdGuard Home (local)</td></tr>
         <tr><td style="padding:4px 0">WiFi</td><td style="text-align:right">Deco mesh (AP mode)</td></tr>
         <tr><td style="padding:4px 0">ISP</td><td style="text-align:right">Bahnhof 500/500</td></tr>
-        <tr><td style="padding:4px 0">WAN adapter</td><td style="text-align:right">RTL8153 (USB 2.0)</td></tr>
+        <tr><td style="padding:4px 0">WAN adapter</td><td style="text-align:right">RTL8153 ({wan_usb})</td></tr>
         <tr><td style="padding:4px 0">WAN link speed</td><td style="text-align:right">{wan_speed}</td></tr>
     </table>
 </div>
@@ -684,10 +703,7 @@ async function doAction(action, target) {{
             let (host, _) = get_host_label();
             host
         },
-        platform_label = {
-            let (_, platform) = get_host_label();
-            if platform.is_empty() { "Linux".to_string() } else { platform }
-        },
+        wan_usb = data.wan_usb_speed,
     )
 }
 
