@@ -645,7 +645,6 @@ footer a {{ color: var(--accent); text-decoration: none; }}
     <button class="btn btn-primary" onclick="doAction('speedtest')">Speed Test</button>
     <button class="btn btn-success" onclick="doAction('doctor')">Health Check</button>
     <button class="btn btn-warning" onclick="doAction('restart', 'wan')">Restart WAN</button>
-    <button class="btn btn-danger" onclick="doAction('reboot')" id="reboot-btn">Reboot Router</button>
     <button class="btn btn-sm" onclick="doAction('flush_dns')">Flush DNS Cache</button>
     <button class="btn btn-sm" onclick="doAction('update_blocklists')">Update Blocklists</button>
     <button class="btn btn-sm" onclick="doAction('show_leases')">Connected Devices</button>
