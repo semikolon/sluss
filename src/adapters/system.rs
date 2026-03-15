@@ -1,8 +1,32 @@
 //! System metrics and service status
 
 use anyhow::Result;
+use std::sync::OnceLock;
 
 use crate::location::execute_shell;
+
+/// Cached WAN interface name (detected once, reused).
+static WAN_INTERFACE: OnceLock<String> = OnceLock::new();
+
+/// Detect WAN interface — the one with the default route.
+/// Parses `ip route show default` output like:
+///   "default via 94.254.88.1 dev enx00e04c680072 proto dhcp ..."
+/// Falls back to "unknown" if detection fails.
+pub fn detect_wan_interface() -> &'static str {
+    WAN_INTERFACE.get_or_init(|| {
+        execute_shell("ip route show default 2>/dev/null")
+            .ok()
+            .and_then(|o| {
+                let stdout = String::from_utf8_lossy(&o.stdout).to_string();
+                let parts: Vec<&str> = stdout.split_whitespace().collect();
+                parts.iter()
+                    .position(|&p| p == "dev")
+                    .and_then(|i| parts.get(i + 1))
+                    .map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "unknown".to_string())
+    })
+}
 
 #[derive(Debug)]
 pub struct SystemMetrics {
@@ -42,12 +66,14 @@ pub fn get_system_metrics() -> Result<SystemMetrics> {
 
 /// Get WAN IP address
 pub fn get_wan_ip() -> Result<String> {
-    // Try to get external IP from WAN interface
-    // On SHANNON, WAN is on enxc84d4421f975 (USB ethernet)
+    let iface = detect_wan_interface();
     let output = execute_shell(
-        "ip -4 addr show enxc84d4421f975 2>/dev/null | grep -oP 'inet \\K[\\d.]+' || \
-         curl -s --max-time 2 ifconfig.me 2>/dev/null || \
-         echo 'unknown'"
+        &format!(
+            "ip -4 addr show {} 2>/dev/null | grep -oP 'inet \\K[\\d.]+' || \
+             curl -s --max-time 2 ifconfig.me 2>/dev/null || \
+             echo 'unknown'",
+            iface
+        )
     )?;
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())

@@ -14,7 +14,7 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use tracing::info;
 
-use crate::adapters::system::{get_service_status, get_system_metrics, get_wan_ip};
+use crate::adapters::system::{detect_wan_interface, get_service_status, get_system_metrics, get_wan_ip};
 use crate::location::execute_shell;
 
 pub async fn serve(bind: &str, port: u16) -> anyhow::Result<()> {
@@ -124,8 +124,10 @@ fn collect_dashboard_data() -> DashboardData {
     // AdGuard DNS stats via HTTP API (2s timeout, optional basic auth)
     let dns_queries_today = fetch_agh_dns_queries().unwrap_or_else(|| "N/A".into());
 
+    let wan_iface = detect_wan_interface();
+
     // WAN speed estimate
-    let wan_speed = execute_shell("ethtool enxc84d4421f975 2>/dev/null | grep Speed | awk '{print $2}'")
+    let wan_speed = execute_shell(&format!("ethtool {} 2>/dev/null | grep Speed | awk '{{print $2}}'", wan_iface))
         .ok()
         .map(|o| {
             let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -135,7 +137,7 @@ fn collect_dashboard_data() -> DashboardData {
 
     // Detect WAN adapter USB bus speed from sysfs
     let wan_usb_speed = execute_shell(
-        "cat /sys/class/net/enxc84d4421f975/device/../speed 2>/dev/null"
+        &format!("cat /sys/class/net/{}/device/../speed 2>/dev/null", wan_iface)
     )
     .ok()
     .map(|o| {
@@ -861,7 +863,8 @@ async fn api_action(Query(params): Query<ActionParams>) -> impl IntoResponse {
                 let target = params.target.as_deref().unwrap_or("");
                 match target {
                     "wan" => {
-                        let _ = execute_shell("ip link set enxc84d4421f975 down && sleep 2 && ip link set enxc84d4421f975 up");
+                        let wan_iface = detect_wan_interface();
+                        let _ = execute_shell(&format!("ip link set {} down && sleep 2 && ip link set {} up", wan_iface, wan_iface));
                         serde_json::json!({"ok": true, "message": "WAN adapter restarted. Reconnecting..."})
                     }
                     service => {

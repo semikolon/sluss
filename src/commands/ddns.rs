@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::process::Command;
 
+use crate::adapters::system::detect_wan_interface;
 use crate::output::print_output;
 
 const STATE_FILE: &str = "/var/cache/router-ddns-state.json";
 const DDNS_SCRIPT: &str = "/usr/local/lib/router-security/ddns_update.py";
-const WAN_INTERFACE: &str = "enxc84d4421f975";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DdnsState {
@@ -59,7 +59,7 @@ impl Display for DdnsStatus {
 /// Get WAN IP from interface
 fn get_wan_ip() -> Option<String> {
     let output = Command::new("ip")
-        .args(["-4", "-o", "addr", "show", WAN_INTERFACE])
+        .args(["-4", "-o", "addr", "show", detect_wan_interface()])
         .output()
         .ok()?;
 
