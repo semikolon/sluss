@@ -60,6 +60,47 @@ struct DashboardData {
     recent_security: Vec<SecurityFinding>,
 }
 
+/// Format a large number with K/M suffixes for dashboard display.
+fn format_count(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 10_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else if n >= 1_000 {
+        // Use comma separator for 1,000-9,999
+        let s = n.to_string();
+        format!("{},{}", &s[..s.len() - 3], &s[s.len() - 3..])
+    } else {
+        n.to_string()
+    }
+}
+
+/// Fetch DNS query count from AdGuardHome API.
+/// Uses AGH_USER / AGH_PASSWORD env vars for basic auth if set.
+/// Returns None on any failure (timeout, parse error, connection refused).
+fn fetch_agh_dns_queries() -> Option<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .ok()?;
+
+    let mut req = client.get("http://192.168.4.1:3000/control/stats");
+
+    // Apply basic auth if credentials are available
+    if let (Ok(user), Ok(pass)) = (std::env::var("AGH_USER"), std::env::var("AGH_PASSWORD")) {
+        req = req.basic_auth(user, Some(pass));
+    }
+
+    let resp = req.send().ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    let body: serde_json::Value = resp.json().ok()?;
+    let count = body.get("num_dns_queries")?.as_u64()?;
+    Some(format_count(count))
+}
+
 fn collect_dashboard_data() -> DashboardData {
     let wan_ip = get_wan_ip().unwrap_or_else(|_| "unknown".into());
     let metrics = get_system_metrics().unwrap_or_else(|_| crate::adapters::system::SystemMetrics {
@@ -80,16 +121,8 @@ fn collect_dashboard_data() -> DashboardData {
         .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u32>().ok())
         .unwrap_or(0);
 
-    // AdGuard DNS stats
-    let dns_queries_today = execute_shell(
-        "curl -s http://127.0.0.1:3000/control/stats 2>/dev/null | grep -o '\"num_dns_queries\":[0-9]*' | cut -d: -f2"
-    )
-    .ok()
-    .map(|o| {
-        let n = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        if n.is_empty() { "N/A".into() } else { n }
-    })
-    .unwrap_or_else(|| "N/A".into());
+    // AdGuard DNS stats via HTTP API (2s timeout, optional basic auth)
+    let dns_queries_today = fetch_agh_dns_queries().unwrap_or_else(|| "N/A".into());
 
     // WAN speed estimate
     let wan_speed = execute_shell("ethtool enxc84d4421f975 2>/dev/null | grep Speed | awk '{print $2}'")
